@@ -14,7 +14,7 @@ public interface Listener {
      * @param cells Board cells.
      * @return Whether to keep searching.
      */
-    boolean solution(int[] cells);
+    boolean solution(byte[] cells);
 
     /**
      * Counts number of solutions.
@@ -23,7 +23,7 @@ public interface Listener {
         private final AtomicInteger count = new AtomicInteger();
 
         @Override
-        public boolean solution(int[] cells) {
+        public boolean solution(byte[] cells) {
             count.incrementAndGet();
             return true;
         }
@@ -47,7 +47,7 @@ public interface Listener {
         }
 
         @Override
-        public synchronized boolean solution(int[] cells) {
+        public synchronized boolean solution(byte[] cells) {
             try {
                 for (int n = 0; n < Board.CELLS; n++) {
                     if (n % 9 == 0) {

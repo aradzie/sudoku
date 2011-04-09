@@ -12,7 +12,7 @@ public class SolveEmptyBoard {
 
         board.solve(new Listener() {
             @Override
-            public boolean solution(int[] cells) {
+            public boolean solution(byte[] cells) {
                 printer.solution(cells);
                 return false;
             }

@@ -1,5 +1,6 @@
 package sudoku;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.concurrent.RecursiveAction;
 
@@ -14,7 +15,7 @@ public class Board {
      * Assists in building sudoku board.
      */
     public static class Builder {
-        private final int[] cells = new int[CELLS];
+        private final byte[] cells = new byte[CELLS];
         private int count;
 
         /**
@@ -30,7 +31,7 @@ public class Board {
             if (value < 0 || value > 9) {
                 throw new IllegalArgumentException("input out of range");
             }
-            cells[count++] = value;
+            cells[count++] = (byte) value;
             return this;
         }
 
@@ -48,13 +49,13 @@ public class Board {
     /**
      * Forks new actions when there is a need to split search.
      */
-    private static class SolverAction extends RecursiveAction {
+    private class SolverAction extends RecursiveAction {
         private final Listener listener;
-        private final int[] cells;
+        private final byte[] cells;
         private final int[] candidates;
         private int index;
 
-        private SolverAction(Listener listener, int[] cells, int[] candidates, int index) {
+        private SolverAction(Listener listener, byte[] cells, int[] candidates, int index) {
             this.listener = listener;
             this.cells = cells;
             this.candidates = candidates;
@@ -76,7 +77,7 @@ public class Board {
                 int vx = (v >> 10) & 15;
                 int vy = (v >> 14) & 15;
                 int vb = (v >> 18) & 15;
-                int vs = v & 511;
+                int vs = v & SET_MASK;
 
                 // Iterate over all candidates for a cell.
                 int branches = bitCount(vs);
@@ -88,9 +89,9 @@ public class Board {
                     while (vs > 0) {
                         if ((vs & 1) == 1) {
                             // Found the next candidate.
-                            cells[vy * DIM + vx] = n + 1;
+                            cells[vy * DIM + vx] = (byte) (n + 1);
 
-                            int[] nextCells;
+                            byte[] nextCells;
                             int[] nextCandidates;
                             if (vs > 1) {
                                 // Going to fork search, so make clone of the mutable lists.
@@ -103,7 +104,7 @@ public class Board {
                             }
 
                             // Remove this candidate from the corresponding row, cell and block.
-                            removeCandidate(nextCandidates, vx, vy, vb, n);
+                            removeCandidate(nextCandidates, peers, index, n);
 
                             // Solve recursively in parallel thread.
                             tasks.add(new SolverAction(listener, nextCells, nextCandidates, index + 1));
@@ -120,10 +121,10 @@ public class Board {
                     while (vs > 0) {
                         if ((vs & 1) == 1) {
                             // Found the next candidate.
-                            cells[vy * DIM + vx] = n + 1;
+                            cells[vy * DIM + vx] = (byte) (n + 1);
 
                             // Remove this candidate from the corresponding row, cell and block.
-                            removeCandidate(candidates, vx, vy, vb, n);
+                            removeCandidate(candidates, peers, index, n);
 
                             // Solve recursively.
                             solve(index + 1);
@@ -151,12 +152,62 @@ public class Board {
      */
     public static final int CELLS = DIM * DIM;
     /**
+     * Mask of set bits of candidate element.
+     */
+    private static final int SET_MASK = 511;
+    /**
      * Board cell values in range 1-9, zero means empty cell.
      */
-    private final int[] cells;
+    private final byte[] cells;
+    /**
+     * Array of sets of candidate values for empty cells.
+     * <p>Every array element is a record of fields encoded as a bit string:</p>
+     * <pre>
+     *   P   B   Y   X   BITSET      record field name
+     * +---+---+---+---+--------+
+     *   ~   4   4   4     10        bit count
+     * </pre>
+     * <p>Where <code>P</code> is the index in the array of peers,
+     * <code>B</code> is cell block number in range [1-9] minus 1,
+     * <code>X</code> and <code>Y</code> are coordinates of the cell in
+     * range [1-9] minus 1. <code>BITSET</code> is a bit mask where each bit
+     * in position <code>N</code> designates candidate decimal number
+     * <code>N + 1</code>. If, for example 3th bit is set, it means that 4
+     * is a possible candidate for cell X,Y. There may be up to 9 candidates
+     * for every empty cell, hence at most 9 bits set.</p>
+     */
+    private final int[] candidates;
+    /**
+     * Indexes of peer candidates for every candidate element.
+     * Peers of a cells are on the same row, column or in the same block.
+     */
+    private final byte[][] peers;
+    private final BigInteger searchSpace;
 
-    private Board(int[] cells) {
+    private Board(byte[] cells) {
         this.cells = cells;
+        candidates = findCandidates(cells);
+        sortCandidates(candidates);
+        peers = findPeers(candidates);
+        BigInteger n = BigInteger.valueOf(1);
+        for (int candidate : candidates) {
+            n = n.multiply(BigInteger.valueOf(bitCount(candidate & SET_MASK)));
+        }
+        searchSpace = n;
+    }
+
+    /**
+     * @return The number of branches in the search space.
+     */
+    public BigInteger getSearchSpace() {
+        return searchSpace;
+    }
+
+    /**
+     * @return Number of empty cells.
+     */
+    public int getEmptyCellCount() {
+        return candidates.length;
     }
 
     /**
@@ -165,12 +216,12 @@ public class Board {
      * @param listener Listener to be notified of solutions.
      */
     public void solve(Listener listener) {
-        // For every cell find set of candidate values.
-        int[] candidates = findCandidates(cells);
-        // Sort candidate values by set size, increasing.
-        sortCandidates(candidates);
         // Solve recursively starting from the first candidate.
-        solveSequentially(listener, candidates, 0);
+        // Clone mutable structures to make method reentrant.
+        solveSequentially(listener,
+                copyOf(cells, cells.length),
+                copyOf(candidates, candidates.length),
+                0);
     }
 
     /**
@@ -181,9 +232,11 @@ public class Board {
      * @return A recursive action instance.
      */
     public RecursiveAction newSolverAction(Listener listener) {
-        int[] candidates = findCandidates(cells);
-        sortCandidates(candidates);
-        return new SolverAction(listener, cells, candidates, 0);
+        // Clone mutable structures to make method reentrant.
+        return new SolverAction(listener,
+                copyOf(cells, cells.length),
+                copyOf(candidates, candidates.length),
+                0);
     }
 
 
@@ -191,11 +244,12 @@ public class Board {
      * The algorithm!
      *
      * @param listener   A listener instance to be notified of found solutions.
+     * @param cells      Cells to be filled in.
      * @param candidates Array of candidate sets.
      * @param index      The index of candidate set to start search from.
      * @return Whether to keep searching or just stop.
      */
-    private boolean solveSequentially(Listener listener, int[] candidates, int index) {
+    private boolean solveSequentially(Listener listener, byte[] cells, int[] candidates, int index) {
         if (index == candidates.length) {
             // All candidates are filled in, so the solution is found!
             validateBoard(cells);
@@ -205,14 +259,14 @@ public class Board {
             int vx = (v >> 10) & 15;
             int vy = (v >> 14) & 15;
             int vb = (v >> 18) & 15;
-            int vs = v & 511;
+            int vs = v & SET_MASK;
 
             // Iterate over all candidates for a cell.
             int n = 0;
             while (vs > 0) {
                 if ((vs & 1) == 1) {
                     // Found the next candidate.
-                    cells[vy * DIM + vx] = n + 1;
+                    cells[vy * DIM + vx] = (byte) (n + 1);
 
                     int[] nextCandidates;
                     if (vs > 1) {
@@ -224,13 +278,10 @@ public class Board {
                     }
 
                     // Remove this candidate from the corresponding row, cell and block.
-                    removeCandidate(nextCandidates, vx, vy, vb, n);
+                    removeCandidate(nextCandidates, peers, index, n);
 
                     // Solve recursively.
-                    boolean more = solveSequentially(listener, nextCandidates, index + 1);
-
-                    // Undo move.
-                    cells[vy * DIM + vx] = 0;
+                    boolean more = solveSequentially(listener, cells, nextCandidates, index + 1);
 
                     if (!more) {
                         // Listener does not want new results,
@@ -250,23 +301,16 @@ public class Board {
      * Remove candidate values from cells on the same row, column
      * and in the same block.
      *
-     * @param candidate Candidates array.
-     * @param vx        Current cell X coordinate.
-     * @param vy        Current cell Y coordinate.
-     * @param vb        Current cell block number.
-     * @param n         Candidates to remove.
+     * @param candidates Candidates array.
+     * @param peers      Candidate peers.
+     * @param index      Candidate index.
+     * @param n          Candidates to remove.
      */
-    private static void removeCandidate(int[] candidate, int vx, int vy, int vb, int n) {
-        for (int i = 0; i < candidate.length; i++) {
-            int w = candidate[i];
-            int wx = (w >> 10) & 15;
-            int wy = (w >> 14) & 15;
-            int wb = (w >> 18) & 15;
-            // See if other candidate set is on the same row, column or block.
-            if (wx == vx || wy == vy || wb == vb) {
-                // Remove candidate value from the other set.
-                candidate[i] = w & ~(1 << n);
-            }
+    private static void removeCandidate(int[] candidates, byte[][] peers, int index, int n) {
+        byte[] p = peers[candidates[index] >> 22];
+        for (byte i : p) {
+            int v = candidates[i];
+            candidates[i] = v & ~(1 << n);
         }
     }
 
@@ -275,7 +319,7 @@ public class Board {
      *
      * @param cells Board cells.
      */
-    private static void validateBoard(int[] cells) {
+    private static void validateBoard(byte[] cells) {
         for (int y = 0; y < DIM; y++) {
             for (int x = 0; x < DIM; x++) {
                 int s = findCellCandidates(cells, x, y);
@@ -288,24 +332,11 @@ public class Board {
 
     /**
      * For every empty board cell fill set of possible candidate values.
-     * <p>Every array element is a record of fields encoded as a bit string:</p>
-     * <pre>
-     *   B   Y   X   BITSET      record field name
-     * +---+---+---+--------+
-     *   4   4   4     10        bit count
-     * </pre>
-     * <p>Where <code>B</code> is cell block number in range [1-9] minus 1,
-     * <code>X</code> and <code>Y</code> are coordinates of the cell in
-     * range [1-9] minus 1. <code>BITSET</code> is a bit mask where each bit
-     * in position <code>P</code> designates candidate decimal number
-     * <code>P + 1</code>. If, for example 3th bit is set, it means that 4
-     * is a possible candidate for cell X,Y. There may be up to 9 candidates
-     * for every empty cell, hence at most 9 bits set.</p>
      *
      * @param cells Board cells.
      * @return Array of candidate records.
      */
-    private static int[] findCandidates(int[] cells) {
+    private static int[] findCandidates(byte[] cells) {
         int[] candidates = new int[CELLS];
         int length = 0;
         for (int y = 0; y < DIM; y++) {
@@ -333,7 +364,7 @@ public class Board {
      * @return Cell candidate values encoded as a bit set.
      * @throws IllegalStateException If board contains illegal values.
      */
-    private static int findCellCandidates(int[] cells, int x, int y) {
+    private static int findCellCandidates(byte[] cells, int x, int y) {
         // scan row x
         int s1 = 0;
         for (int i = 0; i < DIM; i++) {
@@ -375,7 +406,7 @@ public class Board {
                 }
             }
         }
-        return ~(s1 | s2 | s3) & 511;
+        return ~(s1 | s2 | s3) & SET_MASK;
     }
 
     /**
@@ -391,12 +422,12 @@ public class Board {
         for (int i = 1; i < candidates.length; i++) {
             for (int j = i; j > 0; j--) {
                 int b = candidates[j];
-                int cb = bitCount(b & 511);
+                int cb = bitCount(b & SET_MASK);
                 if (cb == 0) {
                     break;
                 }
                 int a = candidates[j - 1];
-                int ca = bitCount(a & 511);
+                int ca = bitCount(a & SET_MASK);
                 if (ca == 0 || ca > cb) {
                     candidates[j - 1] = b;
                     candidates[j] = a;
@@ -405,5 +436,50 @@ public class Board {
                 }
             }
         }
+    }
+
+    /**
+     * For every candidate cell find other candidates on the same
+     * row, column and block.
+     *
+     * @param candidates Candidates array.
+     * @return Array of indexes of peers for each candidate.
+     */
+    private static byte[][] findPeers(int[] candidates) {
+        byte[][] peers = new byte[candidates.length][];
+        for (int m = 0; m < candidates.length; m++) {
+            int v = candidates[m];
+            int vx = (v >> 10) & 15;
+            int vy = (v >> 14) & 15;
+            int vb = (v >> 18) & 15;
+            // Count peers.
+            int pn = 0;
+            for (int n = 0; n < candidates.length; n++) {
+                int w = candidates[n];
+                int wx = (w >> 10) & 15;
+                int wy = (w >> 14) & 15;
+                int wb = (w >> 18) & 15;
+                // See if other candidate set is on the same row, column or block.
+                if (wx == vx || wy == vy || wb == vb) {
+                    pn++;
+                }
+            }
+            // Populate peers.
+            byte[] p = peers[m] = new byte[pn];
+            int pi = 0;
+            for (int n = 0; n < candidates.length; n++) {
+                int w = candidates[n];
+                int wx = (w >> 10) & 15;
+                int wy = (w >> 14) & 15;
+                int wb = (w >> 18) & 15;
+                // See if other candidate set is on the same row, column or block.
+                if (wx == vx || wy == vy || wb == vb) {
+                    p[pi++] = (byte) n;
+                }
+            }
+            // Make reference to peers in candidate.
+            candidates[m] = v | (m << 22);
+        }
+        return peers;
     }
 }

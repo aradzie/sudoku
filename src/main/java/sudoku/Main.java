@@ -19,6 +19,11 @@ public class Main {
     }
 
     private static void benchmark(Board board, PrintStream out) {
+        out.println(String.format("empty cells: %d", board.getEmptyCellCount()));
+        out.println(String.format("search space: %s branches before elimination", board.getSearchSpace()));
+
+        out.println();
+
         out.println("solving sequentially...");
         Listener.Counter c1 = new Listener.Counter();
         long t1 = solveSequentially(board, c1);
