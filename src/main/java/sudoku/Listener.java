@@ -46,6 +46,10 @@ public interface Listener {
             this.out = out;
         }
 
+        public Appendable getOut() {
+            return out;
+        }
+
         @Override
         public synchronized boolean solution(byte[] cells) {
             try {

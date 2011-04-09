@@ -8,13 +8,15 @@ public class SolveEmptyBoard {
         }
         Board board = builder.build();
 
-        final Listener.Printer printer = new Listener.Printer(System.out);
-
         board.solve(new Listener() {
+            final Listener.Printer printer = new Listener.Printer(System.out);
+            int count;
+
             @Override
             public boolean solution(byte[] cells) {
                 printer.solution(cells);
-                return false;
+
+                return ++count < 10;
             }
         });
     }
