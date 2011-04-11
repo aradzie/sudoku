@@ -2,7 +2,6 @@ package sudoku;
 
 import java.io.*;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.RecursiveAction;
 
 public class Main {
     private static final ForkJoinPool pool = new ForkJoinPool();
@@ -35,10 +34,11 @@ public class Main {
 
         out.println("solving parallelly...");
         Listener.Counter c2 = new Listener.Counter();
-        long t2 = solveParallelly(pool, board, c2);
+        Board.SolverAction action = board.newSolverAction(c2);
+        long t2 = solveParallelly(pool, action);
         out.println(String.format("done in: %,dms", t2));
         out.println(String.format("solutions: %,d", c2.count()));
-        out.println(String.format("forked solvers: %,d", Board.getForks()));
+        out.println(String.format("forked solvers: %,d", action.getForkedActions()));
 
         out.println();
 
@@ -56,9 +56,8 @@ public class Main {
         return end - start;
     }
 
-    private static long solveParallelly(ForkJoinPool pool, Board board, Listener.Counter counter) {
+    private static long solveParallelly(ForkJoinPool pool, Board.SolverAction action) {
         long start = System.currentTimeMillis();
-        RecursiveAction action = board.newSolverAction(counter);
         pool.execute(action);
         action.join();
         long end = System.currentTimeMillis();

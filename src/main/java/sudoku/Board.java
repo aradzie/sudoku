@@ -3,7 +3,6 @@ package sudoku;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.concurrent.RecursiveAction;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.lang.Integer.bitCount;
 import static java.util.Arrays.copyOf;
@@ -42,22 +41,29 @@ public class Board {
     }
 
     /** Forks new actions when there is a need to split search. */
-    private class SolverAction extends RecursiveAction {
+    public class SolverAction extends RecursiveAction {
         private final Listener listener;
         private final byte[] cells;
         private final int[] candidates;
         private final int index;
+        private int forkedActions;
 
         private SolverAction(Listener listener, byte[] cells, int[] candidates, int index) {
             this.listener = listener;
             this.cells = cells;
             this.candidates = candidates;
             this.index = index;
+            forkedActions = 1;
         }
 
         @Override
         protected void compute() {
             solve(index);
+        }
+
+        /** @return Total number of all child actions forked by this action. */
+        public int getForkedActions() {
+            return forkedActions;
         }
 
         private void solve(int index) {
@@ -105,10 +111,12 @@ public class Board {
                         n++;
                     }
 
-                    // Fork parallel solvers.
+                    // Fork...
                     invokeAll(tasks);
-                    // Batch increment to reduce contention on this counter.
-                    forks.addAndGet(tasks.size());
+                    // ... and join.
+                    for (SolverAction task : tasks) {
+                        forkedActions += task.forkedActions;
+                    }
                 } else {
                     // Not forking so search recursively.
                     int n = 0;
@@ -148,8 +156,6 @@ public class Board {
     private static final int XY_MASK = 15;
     /** Offset to index in the array of peers. */
     private static final int P_OFF = 18;
-    /** Total number of all forked solvers. */
-    private static final AtomicInteger forks = new AtomicInteger();
     /** Board cell values in range 1-9, zero means empty cell. */
     private final byte[] cells;
     /**
@@ -176,10 +182,6 @@ public class Board {
     private final byte[][] peers;
     private final BigInteger searchSpace;
 
-    /** @return Total number of all solvers forked in the fork/join pool. */
-    public static int getForks() {
-        return forks.get();
-    }
 
     private Board(byte[] c) {
         cells = c;
@@ -228,7 +230,7 @@ public class Board {
      * @param listener Listener to be notified of solutions.
      * @return A recursive action instance.
      */
-    public RecursiveAction newSolverAction(Listener listener) {
+    public SolverAction newSolverAction(Listener listener) {
         // Clone mutable structures to make method reentrant.
         return new SolverAction(listener,
                 copyOf(cells, cells.length),
@@ -280,8 +282,7 @@ public class Board {
                     boolean more = solveSequentially(listener, cells, nextCandidates, index + 1);
 
                     if (!more) {
-                        // Listener does not want new results,
-                        // so stop searching.
+                        // Listener does not want new results, so stop searching.
                         return false;
                     }
                 }
