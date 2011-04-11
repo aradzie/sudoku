@@ -4,9 +4,7 @@ import java.io.Flushable;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Board notifies listener every time it finds a solution.
- */
+/** Board notifies listener every time it finds a solution. */
 public interface Listener {
     /**
      * Found new solution.
@@ -16,9 +14,7 @@ public interface Listener {
      */
     boolean solution(byte[] cells);
 
-    /**
-     * Counts number of solutions.
-     */
+    /** Counts number of solutions. */
     class Counter implements Listener {
         private final AtomicInteger count = new AtomicInteger();
 
@@ -28,17 +24,13 @@ public interface Listener {
             return true;
         }
 
-        /**
-         * @return Number of solutions.
-         */
+        /** @return Number of solutions. */
         public int count() {
             return count.get();
         }
     }
 
-    /**
-     * Prints solution to the specified appendable.
-     */
+    /** Prints solution to the specified appendable. */
     class Printer implements Listener {
         private final Appendable out;
 

@@ -19,8 +19,9 @@ public class Main {
     }
 
     private static void benchmark(Board board, PrintStream out) {
-        out.println(String.format("empty cells: %d", board.getEmptyCellCount()));
-        out.println(String.format("search space: %s branches before elimination", board.getSearchSpace()));
+        out.println(String.format("empty cells: %d", board.getEmptyCells()));
+        out.println(String.format("fill factor: %d%%", (int) (100 * board.getFillFactor())));
+        out.println(String.format("search space before elimination: %s branches", board.getSearchSpace()));
 
         out.println();
 
@@ -28,7 +29,7 @@ public class Main {
         Listener.Counter c1 = new Listener.Counter();
         long t1 = solveSequentially(board, c1);
         out.println(String.format("done in: %,dms", t1));
-        out.println(String.format("solutions: %d", c1.count()));
+        out.println(String.format("solutions: %,d", c1.count()));
 
         out.println();
 
@@ -36,11 +37,16 @@ public class Main {
         Listener.Counter c2 = new Listener.Counter();
         long t2 = solveParallelly(pool, board, c2);
         out.println(String.format("done in: %,dms", t2));
-        out.println(String.format("solutions: %d", c2.count()));
+        out.println(String.format("solutions: %,d", c2.count()));
+        out.println(String.format("forked solvers: %,d", Board.getForks()));
 
         out.println();
 
         System.out.println(String.format("speedup: %f", (float) t1 / (float) t2));
+
+        out.println();
+
+        System.out.println(pool);
     }
 
     private static long solveSequentially(Board board, Listener.Counter listener) {
