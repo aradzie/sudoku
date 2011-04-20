@@ -186,6 +186,7 @@ public class Board {
     private Board(byte[] c) {
         cells = c;
         candidates = findCandidates(cells);
+        //sortCandidates(candidates);
         peers = findPeers(candidates);
         BigInteger n = BigInteger.valueOf(1);
         for (int candidate : candidates) {
@@ -458,5 +459,17 @@ public class Board {
 
     private static int block(int x, int y) {
         return y / 3 * 3 + x / 3;
+    }
+
+    private static void sortCandidates(int[] candidates) {
+        for (int m = 1; m < candidates.length; m++) {
+            int v = candidates[m];
+            int n = m;
+            for (; n > 0 && bitCount(candidates[n - 1] & SET_MASK)
+                    > bitCount(v & SET_MASK); n--) {
+                candidates[n] = candidates[n - 1];
+            }
+            candidates[n] = v;
+        }
     }
 }
